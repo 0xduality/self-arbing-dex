@@ -1,0 +1,238 @@
+\documentclass{article}
+
+% Definitions of handy macros can go here
+\usepackage{xcolor}
+\definecolor{myblue}{HTML}{0060c0}
+\definecolor{myred}{HTML}{c00060}
+\definecolor{mygreen}{HTML}{60c000}
+
+\usepackage{hyperref}
+
+\hypersetup{
+  linkcolor   = myblue,
+  citecolor   = myred,
+  urlcolor    = mygreen,
+  colorlinks  = true,
+  pagebackref = true,
+}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+
+% --------------------------------
+% Additional packages and commands
+\usepackage{amsmath,amsfonts,amsthm,amssymb}
+\usepackage[]{xcolor}
+\usepackage[numbers]{natbib}
+\usepackage{comment}
+\usepackage{graphicx} 
+\usepackage{algpseudocode}
+\usepackage{algorithm}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\I}{\mathbb{I}}
+\newcommand{\N}{\mathbb{N}}
+
+\DeclareMathOperator*{\argmin}{argmin}
+\DeclareMathOperator*{\argmax}{argmax}
+\newtheorem{thm}{Theorem}
+
+\makeatletter
+\renewcommand\tableofcontents{%
+    \@starttoc{toc}%
+}
+\makeatother
+ 
+\begin{document}
+
+\title{The Self-Arbing DEX}
+
+\author{Anonymous Author}
+
+\maketitle
+
+\begin{abstract}
+We describe how a DEX can include backrunning logic 
+that can be used to keep substantial arbitrage profits 
+for itself.
+\end{abstract}
+
+\tableofcontents
+\section{Introduction}
+With the advent of Layer 2 networks, subnets, supernets etc, 
+we expect to see DEXes
+that serve local economies without the need for bridging.
+In these DEXes we expect to see only a small number of different tokens
+with a handful of pools containing significant liquidity.
+In such cases a DEX contract can check for arbitrage 
+in a small set of predetermined potential opportunities.
+This paper describes how this can be done efficiently.
+
+\section{Setup and Notation}
+We assume the DEX consists solely of UniswapV2-style pools.
+Each pool $i$ is described by the tokens $s_i,t_i$ and 
+the respective reserves $p_i, q_i$.
+We let $R$ be the mapping from token pairs to reserves so
+that for every pool $i$ we have $R(s_i, t_i) = p_i, q_i$
+and $R(t_i, s_i) = q_i, p_i$.
+
+The DEX administrator has identified a set of opportunities
+that are simply lists/paths of tokens $[a,b,c, \ldots,a]$ such that
+the first and last token are the same and for every adjacent
+pair in the list $(a,b), (b,c), \ldots$ the exists a pool
+in the DEX. When a user trades with the DEX the DEX executes 
+the trade the same way that UniswapV2 does so. As part of the
+same transaction however, the DEX subsequently checks if any
+arbitrage opportunities are available, and if so executes 
+the arb and gives the profits to stakers.
+
+\section{Main Theorem}
+
+For the case of all UniswapV2 pools where the trading fee is 
+$(1-\gamma)$ (with $\gamma = 0.997$ in most deployments) 
+we derive a closed form expression that tells us for any 
+input amount $x_0$ the amount
+of tokens $x_n$ we would get if we traded along 
+the path $[a_0,a_1,a_2,\ldots, a_n]$ i.e.\ trade 
+$x_0$ tokens of $a_0$ for $x_1$ tokens of $a_1$,
+then $x_1$ tokens of $a_1$ for $x_2$ tokens of $a_2$ and so on
+until we get $x_n$ tokens of $a_n$. The following theorem 
+shows that $x_t$ has a form that can be updated easily.
+In the next section we use this observation to compute 
+the optimal amount $x_0$ to maximize profits on
+paths of the form $[a_0, a_1, a_2,\ldots a_0]$
+
+\begin{thm}
+Given a DEX of UniswapV2 pools with trading fee $1-\gamma$ and 
+a path of tokens $[a_0, a_1, \ldots, a_n]$, the output amount
+$x_n$ satisfies
+\begin{equation}
+x_n = \frac{K_n x_0}{x_0 + M_n}
+\end{equation}
+where $K_n, M_n$ are defined 
+via the recurrences
+\begin{align}
+K_{t} &= \frac{\gamma q_t K_{t-1}}{p_t + \gamma K_{t-1}} \\
+M_{t} &= M_{t-1} - \frac{\gamma M_{t-1} K_{t-1}}{p_t + \gamma K_{t-1}}
+\end{align}
+where $p_t,q_t=R(a_{t-1},a_{t})$
+are the reserves of 
+tokens $a_{t-1}$ and $a_{t}$ in their pool.
+and with starting values
+$K_1, M_1 = q_1, p_1/\gamma$.
+\end{thm}
+\begin{proof}
+The proof is by induction on the path length. For $n=1$
+we have $p_1,q_1=R(a_0,a_1)$, $K_1= q_1$, $M_1 = p_1/\gamma$
+and $x_1 = \frac{q_1 x_0}{x_0 + p_1/\gamma}$
+We know check that the Uniswap invariant is maintained with the 
+new reserves
+\[
+(p_1+\gamma x_0)(q_1 -x_1) = (p_1+\gamma x_0)\left(q_1 -\frac{\gamma q_1 x_0}{\gamma x_0 + p_1}\right) = (p_1+\gamma x_0)q_1 - \gamma q_1 x_0 = p_1q_1 
+\]
+This proves the base case. We now assume that the claim holds for paths 
+of length $n-1$ and show that it holds for paths of length $n$.
+By the induction hypothesis when we trade the path $[a_0,a_1,\ldots,a_{n-1},a_n]$ we know that we have
+\[
+x_{n-1} = \frac{K_{n-1} x_0}{x_0 + M_{n-1}}
+\]
+amount of $a_{n-1}$. Now let $p_n,q_n=R(a_{n-1},a_n)$ and consider
+the Uniswap invariant again
+\[
+p_n q_n = (p_n + \gamma x_{n-1})(q_n - x_n).
+\]
+We see that $x_n$ must satisfy
+\[
+x_n = \frac{\gamma q_n x_{n-1}}{p_n + \gamma x_{n-1}}
+\]
+Plugging in the value of $x_{n-1}$ we have
+\[
+x_{n} =  \frac{\frac{\gamma q_n K_{n-1} x_0}{x_0 + M_{n-1}}}{p_n + \gamma \frac{K_{n-1} x_0}{x_0 + M_{n-1}}}
+\]
+\[
+x_{n} =  \frac{\gamma q_n K_{n-1} x_0}{p_n(x_0 + M_{n-1}) + \gamma K_{n-1} x_0}
+\]
+\[
+x_{n} =  \frac{\gamma q_n K_{n-1} x_0}{(p_n + \gamma K_{n-1} ) x_0 + p_n M_{n-1}}
+\]
+\[
+x_{n} =  \frac{\frac{\gamma q_n K_{n-1}}{p_n + \gamma K_{n-1}} x_0}
+{x_0 + \frac{p_n M_{n-1}}{p_n + \gamma K_{n-1}}}
+\]
+\[
+x_{n} =  \frac{\frac{\gamma q_n K_{n-1}}{p_n + \gamma K_{n-1}} x_0}
+{x_0 + M_{n-1}-\frac{\gamma M_{n-1} K_{n-1}}{p_n + \gamma K_{n-1}}}
+\]
+\[
+x_{n} =  \frac{K_{n} x_0}{x_0 + M_{n}}
+\]
+where in the last step we used the recurrences for $K_{n}, M_{n}$. 
+\end{proof}
+
+\section{Optimal Arbitrage Amount}
+
+Given a cycle $[a_0,a_1,\ldots,a_{n-1},a_0]$ we can solve for the 
+optimal arbitrage amount by setting to zero the derivative of the profit
+\[
+y(x_0) = x_{n} - x_0 = \frac{K_{n} x_0}{x_0 + M_{n}} - x_0
+\]
+with respect to the input amount $x_0$. Doing so leads to the 
+solution
+\[
+x_0^* = \sqrt{K_n M_n}-M_n
+\]
+For an arb to be possible we need $x_0^*>0$ or, equivalently, $K_n>M_n$. Furthermore the optimal profit is
+\[
+y(x_0^*) = K_n - M_n - 2 x_0^*
+\]
+
+\section{Algorithm}
+Let $g(x,p,q, \gamma)$ be the amount that we receive when 
+we swap $x$ amount of tokens with reserve $p$ for the other
+token in the pool with reserve $q$ with the fee being $(1-\gamma)$, i.e:
+\[
+g(x, p, q, \gamma) = \frac{\gamma q x}{p+\gamma x}
+\]
+Below is a basic algorithm. Gas optimizations are up to the implementation.  
+\begin{algorithmic}
+\Require{List of opportunity paths $a$}
+\For{$i \gets 0, \ldots, a.\textrm{length}-1$}
+    \State $p, q \gets R(a[i][0],a[i][1])$
+    \State $K, M \gets q, p/\gamma$
+    \For{$j \gets 2, \ldots, a[i].\textrm{length}-1$}
+    \State $p, q \gets R(a[i][j-1],a[i][j])$
+    \State $M \gets M - g(K, p, M, \gamma)$
+    \State $K \gets g(K, p, q, \gamma)$
+    \EndFor
+    \If{$K > M$} 
+        \State $x \gets \sqrt{KM}-M$
+        \State Swap $x$ tokens along path $a[i]$
+        \State break
+    \EndIf
+\EndFor
+\end{algorithmic}
+
+\section{Additional Notes}
+\subsection{Opportunities}
+Suppose we have identified the cycle $[a_0,a_1,a_2,a_0]$ 
+as an interesting opportunity. Should we also consider 
+the cycles $[a_1,a_2,a_0,a_1]$ and $[a_2,a_1,a_0,a_2]$
+which consist of the same pools? The answer is no: 
+All these cycles allow one to
+extract the same amount of value. 
+The difference is only on the token being paid out.
+While cyclical shifts need not be considered,
+the reverse order cycle $[a_0,a_2,a_1,a_0]$ 
+should always be considered.
+
+
+%\vskip 0.2in
+%\bibliography{sample}
+%\bibliographystyle{unsrtnat}
+
+\end{document}
